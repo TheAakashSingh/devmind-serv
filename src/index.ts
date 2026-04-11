@@ -9,6 +9,7 @@ import { aiRouter }      from './routes/ai';
 import { authRouter }    from './routes/auth';
 import { billingRouter } from './routes/billing';
 import { adminRouter }   from './routes/admin';
+import { filesRouter }   from './routes/files';
 import { rateLimiter }   from './middleware/rateLimiter';
 import { authenticate }  from './middleware/authenticate';
 import { initDb }        from './services/db';
@@ -25,6 +26,7 @@ app.use(rateLimiter);
 app.use('/v1/auth',    authRouter);
 app.use('/v1/billing', authenticate, billingRouter);
 app.use('/v1/admin',   authenticate, adminRouter);
+app.use('/v1/files',   authenticate, filesRouter);
 app.use('/v1',         authenticate, aiRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
