@@ -1,0 +1,10 @@
+# Deploy server to Railway
+# 1. Install Railway CLI: npm install -g @railway/cli
+# 2. railway login
+# 3. cd server && railway up
+
+[build]
+  command = "npm run build"
+
+[start]
+  command = "npm start"
