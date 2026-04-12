@@ -67,10 +67,22 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      
       const data = await DS.chat(messages, language, true);
-      data.on('data', (chunk: Buffer) => res.write(chunk));
+      data.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        // Only forward actual data, not [DONE]
+        if (text.includes('data: ') && !text.includes('[DONE]')) {
+          res.write(text);
+        }
+      });
       data.on('end',  () => { res.write('data: [DONE]\n\n'); res.end(); });
-      data.on('error', (e: Error) => res.end());
+      data.on('error', (e: Error) => { 
+        console.error('Stream error:', e.message);
+        res.end(); 
+      });
     } else {
       const data  = await DS.chat(messages, language, false);
       const reply = data.choices?.[0]?.message?.content ?? '';
@@ -78,6 +90,7 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
       res.json({ reply });
     }
   } catch (e: any) {
+    console.error('Chat error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
