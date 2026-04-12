@@ -88,15 +88,17 @@ aiRouter.post('/generate-tests', async (req: Request, res: Response) => {
 aiRouter.post('/scaffold', async (req: Request, res: Response) => {
   const { type, name, language, projectCtx } = req.body;
   const userId = (req as any).userId;
+  console.log('[Scaffold] Request:', { type, name, language, userId });
   try {
     const allowed = await checkQuota(userId);
     if (!allowed) return res.status(429).json({ error: 'Daily quota exceeded.' });
-    // Scaffold uses multiple tokens — count as 5 requests
+    console.log('[Scaffold] Calling DeepSeek...');
     const files = await DS.scaffold(type, name, language || 'typescript', projectCtx);
+    console.log('[Scaffold] Done, files:', files.length);
     await incrementUsage(userId, 'scaffold');
     res.json({ files });
   } catch (e: any) {
-    console.error('[scaffold]', e.message);
+    console.error('[Scaffold] Error:', e.message, e.stack);
     res.status(500).json({ error: e.message });
   }
 });
