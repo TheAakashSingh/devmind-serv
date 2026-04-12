@@ -17,6 +17,9 @@ import { initDb }        from './services/db';
 const app  = express();
 const PORT = process.env.PORT || 4000;
 
+// ── Trust proxy for rate limiter (when behind nginx/load balancer) ─────────────
+app.set('trust proxy', 1);
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(express.json({ limit: '2mb' }));
