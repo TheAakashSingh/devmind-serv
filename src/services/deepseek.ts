@@ -6,7 +6,7 @@ function makeClient(): AxiosInstance {
   if (!key) { console.warn('[DeepSeek] WARNING: DEEPSEEK_API_KEY not set!'); }
   return axios.create({
     baseURL:  base,
-    timeout:  60_000,
+    timeout:  180_000,  // 3 min timeout for large requests
     headers:  { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
   });
 }
@@ -218,10 +218,12 @@ CRITICAL: Return ONLY valid JSON in this EXACT format — nothing before or afte
 {"files":[{"path":"src/modules/${name}/file.${ext}","content":"...actual working code..."}]}
 No markdown, no explanation, no code fences around the JSON.`;
 
+  console.log('[Scaffold] Sending to DeepSeek, maxTokens: 7000');
   const data = await deepseekChat('deepseek-coder', [
     { role: 'system', content: sys },
     { role: 'user',   content: `${ctx}Scaffold a '${scaffoldType}' module for '${name}' in ${language}.\n\nRequirements:\n${description}\n\nGenerate all necessary files with complete, working code following the project's conventions.` },
   ], 7000);
+  console.log('[Scaffold] DeepSeek responded');
 
   const raw = data.choices?.[0]?.message?.content?.trim() ?? '{"files":[]}';
   try {
