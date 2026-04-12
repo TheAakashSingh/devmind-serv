@@ -157,21 +157,18 @@ export async function scaffold(
   const ext  = language === 'typescript' ? 'ts' : language === 'javascript' ? 'js' : language;
 
   const typeDescriptions: Record<string, string> = {
-    auth:   `Complete authentication system for ${Name}:
+    auth:   `Authentication for ${Name}:
+- POST /auth/login — verify credentials, return JWT
 - POST /auth/register — create user, hash password, return JWT
-- POST /auth/login — verify credentials, return JWT + refresh token
-- POST /auth/logout — invalidate token
-- POST /auth/refresh — refresh access token
-- POST /auth/forgot-password — send reset email
-Include: model/schema, controller, routes, middleware (auth guard), input validation, error handling`,
+- Middleware: auth guard
+Include: controller, routes, middleware, model (minimal)`,
 
-    crud:   `Complete CRUD module for '${Name}' resource:
-- GET    /${name}s         — paginated list with filters
-- GET    /${name}s/:id     — get by ID
-- POST   /${name}s         — create with validation
-- PUT    /${name}s/:id     — update
-- DELETE /${name}s/:id     — soft delete
-Include: model/schema, controller, routes, validation, middleware`,
+    crud:   `CRUD for '${Name}':
+- GET /${name}s — list
+- GET /${name}s/:id — get by ID
+- POST /${name}s — create
+- PUT /${name}s/:id — update
+Include: controller, routes, model`,
 
     api:    `REST API endpoint for '${Name}':
 - Full CRUD with pagination
@@ -218,11 +215,11 @@ CRITICAL: Return ONLY valid JSON in this EXACT format — nothing before or afte
 {"files":[{"path":"src/modules/${name}/file.${ext}","content":"...actual working code..."}]}
 No markdown, no explanation, no code fences around the JSON.`;
 
-  console.log('[Scaffold] Sending to DeepSeek, maxTokens: 7000');
+  console.log('[Scaffold] Sending to DeepSeek, maxTokens: 4000');
   const data = await deepseekChat('deepseek-coder', [
     { role: 'system', content: sys },
     { role: 'user',   content: `${ctx}Scaffold a '${scaffoldType}' module for '${name}' in ${language}.\n\nRequirements:\n${description}\n\nGenerate all necessary files with complete, working code following the project's conventions.` },
-  ], 7000);
+  ], 4000);
   console.log('[Scaffold] DeepSeek responded');
 
   const raw = data.choices?.[0]?.message?.content?.trim() ?? '{"files":[]}';
