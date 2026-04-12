@@ -63,34 +63,45 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
   const allowed = await checkQuota(userId);
   if (!allowed) return res.status(429).json({ error: 'Daily quota exceeded.' });
 
+  console.log('[AI] Chat request received:', { userId, messageCount: messages?.length, stream, language });
+
   try {
     if (stream) {
+      console.log('[AI] Starting streaming chat...');
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       
       const data = await DS.chat(messages, language, true);
+      console.log('[AI] DeepSeek stream started, piping data...');
+      
       data.on('data', (chunk: Buffer) => {
         const text = chunk.toString();
-        // Only forward actual data, not [DONE]
+        console.log('[AI] Stream chunk:', text.substring(0, 80));
         if (text.includes('data: ') && !text.includes('[DONE]')) {
           res.write(text);
         }
       });
-      data.on('end',  () => { res.write('data: [DONE]\n\n'); res.end(); });
+      data.on('end',  () => { 
+        console.log('[AI] Stream ended');
+        res.write('data: [DONE]\n\n'); 
+        res.end(); 
+      });
       data.on('error', (e: Error) => { 
-        console.error('Stream error:', e.message);
+        console.error('[AI] Stream error:', e.message);
         res.end(); 
       });
     } else {
+      console.log('[AI] Starting non-streaming chat...');
       const data  = await DS.chat(messages, language, false);
+      console.log('[AI] DeepSeek response received, status:', data?.choices?.length);
       const reply = data.choices?.[0]?.message?.content ?? '';
       await incrementUsage(userId);
       res.json({ reply });
     }
   } catch (e: any) {
-    console.error('Chat error:', e.message);
+    console.error('[AI] Chat error:', e.message, e.stack);
     res.status(500).json({ error: e.message });
   }
 });

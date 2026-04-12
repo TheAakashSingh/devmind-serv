@@ -31,6 +31,7 @@ export async function deepseekChat(
   maxTokens: number,
   stream     = false
 ) {
+  console.log('[DeepSeek] Calling API:', { model, messageCount: messages?.length, maxTokens, stream });
   const res = await http().post('/chat/completions', {
     model,
     messages,
@@ -38,6 +39,7 @@ export async function deepseekChat(
     temperature: 0.2,
     stream,
   }, { responseType: stream ? 'stream' : 'json' });
+  console.log('[DeepSeek] API response status:', res.status);
   return res.data;
 }
 
