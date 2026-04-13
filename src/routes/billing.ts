@@ -14,26 +14,40 @@ function getRazorpay() {
   });
 }
 
-const PLANS: Record<string, { amount: number; name: string }> = {
-  solo: { amount: 49900, name: 'DevMind Solo' },
-  pro:  { amount: 99900, name: 'DevMind Pro'  },
-  team: { amount: 79900, name: 'DevMind Team' },
+const PLANS: Record<string, { inr: number; usd: number; name: string }> = {
+  solo: { inr: 49900, usd: 900,  name: 'DevMind Solo' },
+  pro:  { inr: 99900, usd: 1900, name: 'DevMind Pro'  },
+  team: { inr: 79900, usd: 1500, name: 'DevMind Team' },
 };
+
+billingRouter.get('/catalog', (_req: Request, res: Response) => {
+  res.json({
+    currencies: ['INR', 'USD'],
+    plans: Object.entries(PLANS).map(([id, p]) => ({
+      id,
+      name: p.name,
+      prices: { INR: p.inr, USD: p.usd },
+    })),
+  });
+});
 
 // ── POST /v1/billing/create-order ─────────────────────────────────────────────
 billingRouter.post('/create-order', async (req: Request, res: Response) => {
   const { plan } = req.body;
+  const currency = String(req.body?.currency || 'INR').toUpperCase();
   const userId   = (req as any).userId;
   if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
+  if (!['INR', 'USD'].includes(currency)) return res.status(400).json({ error: 'Invalid currency' });
+  const amount = currency === 'USD' ? PLANS[plan].usd : PLANS[plan].inr;
 
   try {
     const razorpay = getRazorpay();
     const order    = await razorpay.orders.create({
-      amount:   PLANS[plan].amount,
-      currency: 'INR',
-      notes:    { userId, plan },
+      amount,
+      currency,
+      notes:    { userId, plan, currency },
     });
-    res.json({ orderId: order.id, amount: PLANS[plan].amount, currency: 'INR', plan });
+    res.json({ orderId: order.id, amount, currency, plan });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -46,9 +60,12 @@ billingRouter.post('/verify', async (req: Request, res: Response) => {
     razorpay_payment_id,
     razorpay_signature,
     plan,
+    currency,
   } = req.body;
   const userId = (req as any).userId;
   if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
+  const cc = String(currency || 'INR').toUpperCase();
+  const amount = cc === 'USD' ? PLANS[plan].usd : PLANS[plan].inr;
 
   // Verify signature
   const secret   = process.env.RAZORPAY_KEY_SECRET || '';
@@ -63,7 +80,7 @@ billingRouter.post('/verify', async (req: Request, res: Response) => {
     await db.query(
       `INSERT INTO payments (user_id, plan, order_id, payment_id, amount, currency, status, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,
-      [userId, plan, razorpay_order_id, razorpay_payment_id, PLANS[plan].amount, 'INR', 'completed']
+      [userId, plan, razorpay_order_id, razorpay_payment_id, amount, cc, 'completed']
     );
     res.json({ success: true, plan });
   } catch (e: any) {
@@ -76,7 +93,7 @@ billingRouter.get('/history', async (req: Request, res: Response) => {
   const userId = (req as any).userId;
   try {
     const rows = await db.query(
-      'SELECT plan, amount, payment_id, created_at FROM payments WHERE user_id=$1 ORDER BY created_at DESC',
+      'SELECT plan, amount, currency, payment_id, created_at FROM payments WHERE user_id=$1 ORDER BY created_at DESC',
       [userId]
     );
     res.json(rows.rows);

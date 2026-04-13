@@ -35,6 +35,10 @@ export async function initDb() {
       tokens     INT DEFAULT 0,
       tokens_in  INT DEFAULT 0,
       tokens_out INT DEFAULT 0,
+      request_ms INT DEFAULT 0,
+      status     TEXT DEFAULT 'ok',
+      used_fallback BOOLEAN DEFAULT false,
+      error_message TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -59,6 +63,17 @@ export async function initDb() {
       updated_at           TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS team_memory (
+      id          BIGSERIAL PRIMARY KEY,
+      scope       TEXT NOT NULL DEFAULT 'global',
+      policy_name TEXT NOT NULL,
+      policy_text TEXT NOT NULL,
+      is_active   BOOLEAN DEFAULT true,
+      updated_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ DEFAULT NOW()
+    );
+
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
@@ -68,6 +83,10 @@ export async function initDb() {
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS tokens INT DEFAULT 0;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS tokens_in INT DEFAULT 0;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS tokens_out INT DEFAULT 0;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_ms INT DEFAULT 0;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok';
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS used_fallback BOOLEAN DEFAULT false;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_message TEXT;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
     ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS default_intent TEXT DEFAULT 'build';
@@ -77,8 +96,10 @@ export async function initDb() {
     ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
     CREATE INDEX IF NOT EXISTS idx_usage_user_date ON usage_logs(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_usage_status_date ON usage_logs(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_users_apikey    ON users(api_key);
     CREATE INDEX IF NOT EXISTS idx_auth_otps_email ON auth_otps(email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_team_memory_scope ON team_memory(scope, is_active);
   `);
 
   console.log('[DB] Tables ready');

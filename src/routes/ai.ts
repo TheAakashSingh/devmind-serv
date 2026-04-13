@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import * as DS from '../services/deepseek';
-import { checkQuota, incrementUsage } from '../services/quota';
+import { checkQuota, incrementUsage, incrementUsageDetailed } from '../services/quota';
+import { db } from '../services/db';
 
 export const aiRouter = Router();
 
@@ -10,6 +11,22 @@ aiRouter.get('/preferences', async (req: Request, res: Response) => {
   try {
     const row = await DS.getPreferences(userId);
     res.json(row);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /v1/team-memory ───────────────────────────────────────────────────────
+aiRouter.get('/team-memory', async (_req: Request, res: Response) => {
+  try {
+    const rows = await db.query(
+      `SELECT id, scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at
+       FROM team_memory
+       WHERE is_active = true
+       ORDER BY updated_at DESC
+       LIMIT 50`
+    );
+    res.json({ items: rows.rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -156,6 +173,7 @@ aiRouter.post('/multi-refactor', async (req: Request, res: Response) => {
 aiRouter.post('/chat', async (req: Request, res: Response) => {
   const { messages, language, stream, intent, projectMemory } = req.body;
   const userId = (req as any).userId;
+  const started = Date.now();
   try {
     const allowed = await checkQuota(userId);
     if (!allowed) return res.status(429).json({ error: 'Daily quota exceeded.' });
@@ -194,11 +212,32 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
       dataStream.on('end', async () => {
         res.write('data: [DONE]\n\n');
         res.end();
-        try { await incrementUsage(userId, 'chat'); } catch {}
+        try {
+          await incrementUsageDetailed(userId, {
+            action: 'chat',
+            model: 'deepseek-chat',
+            tokensIn: 0,
+            tokensOut: 0,
+            requestMs: Date.now() - started,
+            status: 'ok',
+            usedFallback: false,
+            errorMessage: null,
+          });
+        } catch {}
       });
       dataStream.on('error', (err: Error) => {
         res.write('data: ' + JSON.stringify({ error: err.message }) + '\n\n');
         res.end();
+        void incrementUsageDetailed(userId, {
+          action: 'chat',
+          model: 'deepseek-chat',
+          tokensIn: 0,
+          tokensOut: 0,
+          requestMs: Date.now() - started,
+          status: 'error',
+          usedFallback: false,
+          errorMessage: err.message || 'stream error',
+        }).catch(() => {});
       });
       req.on('close', () => { try { dataStream.destroy(); } catch {} });
     } else {
@@ -211,11 +250,30 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
         effectiveTemp
       );
       const reply = data.choices?.[0]?.message?.content ?? '';
-      await incrementUsage(userId, 'chat');
+      await incrementUsageDetailed(userId, {
+        action: 'chat',
+        model: 'deepseek-chat',
+        tokensIn: 0,
+        tokensOut: 0,
+        requestMs: Date.now() - started,
+        status: 'ok',
+        usedFallback: false,
+        errorMessage: null,
+      });
       res.json({ reply });
     }
   } catch (e: any) {
     console.error('[chat]', e.message);
+    void incrementUsageDetailed(userId, {
+      action: 'chat',
+      model: 'deepseek-chat',
+      tokensIn: 0,
+      tokensOut: 0,
+      requestMs: Date.now() - started,
+      status: 'error',
+      usedFallback: false,
+      errorMessage: e.message || 'chat failed',
+    }).catch(() => {});
     if (!res.headersSent) {
       res.status(500).json({ error: e.message });
     } else {

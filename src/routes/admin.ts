@@ -91,6 +91,84 @@ adminRouter.get('/sessions', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /v1/admin/observability ───────────────────────────────────────────────
+adminRouter.get('/observability', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  try {
+    const [summary, byAction, errors] = await Promise.all([
+      db.query(`
+        SELECT
+          COUNT(*)::int as total_requests,
+          COALESCE(AVG(request_ms),0)::int as avg_latency_ms,
+          COALESCE(MAX(request_ms),0)::int as max_latency_ms,
+          COUNT(*) FILTER (WHERE status='error')::int as failed_requests
+        FROM usage_logs
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+      `),
+      db.query(`
+        SELECT action, COUNT(*)::int as cnt, COALESCE(AVG(request_ms),0)::int as avg_ms
+        FROM usage_logs
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        GROUP BY action ORDER BY cnt DESC LIMIT 20
+      `),
+      db.query(`
+        SELECT action, error_message, created_at
+        FROM usage_logs
+        WHERE status='error'
+        ORDER BY created_at DESC
+        LIMIT 30
+      `),
+    ]);
+    res.json({
+      summary: summary.rows[0],
+      byAction: byAction.rows,
+      errors: errors.rows,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /v1/admin/team-memory ────────────────────────────────────────────────
+adminRouter.get('/team-memory', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  try {
+    const rows = await db.query(
+      `SELECT id, scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at
+       FROM team_memory
+       ORDER BY updated_at DESC
+       LIMIT 100`
+    );
+    res.json({ items: rows.rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /v1/admin/team-memory ───────────────────────────────────────────────
+adminRouter.post('/team-memory', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  const userId = (req as any).userId;
+  const scope = String(req.body?.scope || 'global').slice(0, 32);
+  const policyName = String(req.body?.policyName || '').trim().slice(0, 120);
+  const policyText = String(req.body?.policyText || '').trim().slice(0, 12000);
+  if (!policyName || !policyText) return res.status(400).json({ error: 'policyName and policyText are required' });
+  try {
+    const row = await db.query(
+      `INSERT INTO team_memory (scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at)
+       VALUES ($1,$2,$3,true,$4,NOW(),NOW())
+       RETURNING id, scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at`,
+      [scope, policyName, policyText, userId]
+    );
+    res.json(row.rows[0]);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /v1/admin/payments ──────────────────────────────────────────────
 adminRouter.get('/payments', async (req: Request, res: Response) => {
   const adminCheck = await requireAdmin(req, res);

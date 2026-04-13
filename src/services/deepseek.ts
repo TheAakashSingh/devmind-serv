@@ -21,6 +21,20 @@ function http(): AxiosInstance {
 export interface Message { role: 'system' | 'user' | 'assistant'; content: string; }
 type Intent = 'build' | 'debug' | 'refactor' | 'optimize' | 'secure';
 
+function extractJsonObject(input: string): string | null {
+  const s = String(input || '').trim();
+  if (!s) return null;
+  // Try fenced json first.
+  const fenced = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : s;
+  if (candidate.startsWith('{') && candidate.endsWith('}')) return candidate;
+  // Fallback: grab from first "{" to last "}".
+  const first = candidate.indexOf('{');
+  const last = candidate.lastIndexOf('}');
+  if (first >= 0 && last > first) return candidate.slice(first, last + 1);
+  return null;
+}
+
 export async function getPreferences(userId: string) {
   const row = await db.query(
     `SELECT user_id, default_intent, auto_verify, project_memory, preferred_temperature, updated_at
@@ -292,12 +306,7 @@ No markdown, no explanation, no code fences around the JSON.`;
 
   const raw = data.choices?.[0]?.message?.content?.trim() ?? '{"files":[]}';
   try {
-    // Strip markdown fences if model adds them anyway
-    const cleaned = raw
-      .replace(/^```json\s*/m, '')
-      .replace(/^```\s*/m, '')
-      .replace(/\s*```$/m, '')
-      .trim();
+    const cleaned = extractJsonObject(raw) || raw;
     const parsed = JSON.parse(cleaned);
     return Array.isArray(parsed.files) ? parsed.files : [];
   } catch {
@@ -334,7 +343,7 @@ Return ALL files including unchanged ones. No markdown.`;
 
   const raw = data.choices?.[0]?.message?.content?.trim() ?? '{"files":[]}';
   try {
-    const cleaned = raw.replace(/^```json?\s*/m, '').replace(/\s*```$/m, '').trim();
+    const cleaned = extractJsonObject(raw) || raw;
     return JSON.parse(cleaned);
   } catch {
     return { files: files.map(f => ({ ...f, summary: 'Could not parse refactor result' })) };
@@ -350,6 +359,18 @@ export async function chat(
   projectMemory = '',
   preferredTemperature = 0.15
 ) {
+  const teamPolicies = await db.query(
+    `SELECT policy_name, policy_text
+     FROM team_memory
+     WHERE is_active=true
+     ORDER BY updated_at DESC
+     LIMIT 8`
+  ).catch(() => ({ rows: [] as any[] }));
+  const teamMemoryBlock = teamPolicies.rows.length
+    ? '\nTeam policies:\n' + teamPolicies.rows
+        .map((r: any) => `- ${r.policy_name}: ${String(r.policy_text || '').slice(0, 600)}`)
+        .join('\n')
+    : '';
   const intentRules: Record<Intent, string> = {
     build: 'Focus on implementation details and production-ready code.',
     debug: 'Prioritize root-cause analysis, precise fixes, and validation steps.',
@@ -376,6 +397,6 @@ Response style:
     ? `\nProject memory:\n${projectMemory.slice(0, 6000)}`
     : '';
   const intentBlock = `\nCurrent intent mode: ${intent}\n${intentRules[intent] || intentRules.build}`;
-  const patchedSystem: Message = { role: 'system', content: `${sys.content}${intentBlock}${memoryBlock}` };
+  const patchedSystem: Message = { role: 'system', content: `${sys.content}${intentBlock}${memoryBlock}${teamMemoryBlock}` };
   return deepseekChat('deepseek-chat', [patchedSystem, ...messages], 3500, stream, preferredTemperature);
 }
