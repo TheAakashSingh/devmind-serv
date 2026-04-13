@@ -64,7 +64,11 @@ billingRouter.post('/verify', async (req: Request, res: Response) => {
   } = req.body;
   const userId = (req as any).userId;
   if (!PLANS[plan]) return res.status(400).json({ error: 'Invalid plan' });
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return res.status(400).json({ error: 'Missing payment verification fields' });
+  }
   const cc = String(currency || 'INR').toUpperCase();
+  if (!['INR', 'USD'].includes(cc)) return res.status(400).json({ error: 'Invalid currency' });
   const amount = cc === 'USD' ? PLANS[plan].usd : PLANS[plan].inr;
 
   // Verify signature
@@ -76,7 +80,14 @@ billingRouter.post('/verify', async (req: Request, res: Response) => {
   }
 
   try {
-    await db.query('UPDATE users SET plan=$1 WHERE id=$2', [plan, userId]);
+    const existing = await db.query(
+      'SELECT id, status FROM payments WHERE order_id=$1 LIMIT 1',
+      [razorpay_order_id]
+    );
+    if (existing.rows.length && existing.rows[0].status === 'completed') {
+      return res.json({ success: true, plan, alreadyVerified: true });
+    }
+    await db.query('UPDATE users SET plan=$1, updated_at=NOW() WHERE id=$2', [plan, userId]);
     await db.query(
       `INSERT INTO payments (user_id, plan, order_id, payment_id, amount, currency, status, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,

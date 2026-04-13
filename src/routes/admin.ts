@@ -130,15 +130,51 @@ adminRouter.get('/observability', async (req: Request, res: Response) => {
   }
 });
 
+adminRouter.get('/observability/live', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  try {
+    const [last5m, fallback, risk] = await Promise.all([
+      db.query(`
+        SELECT COUNT(*)::int as requests,
+               COALESCE(AVG(request_ms),0)::int as avg_ms,
+               COUNT(*) FILTER (WHERE status='error')::int as errors
+        FROM usage_logs
+        WHERE created_at > NOW() - INTERVAL '5 minutes'
+      `),
+      db.query(`
+        SELECT COUNT(*)::int as fallback_count
+        FROM usage_logs
+        WHERE created_at > NOW() - INTERVAL '24 hours' AND used_fallback=true
+      `),
+      db.query(`
+        SELECT COALESCE(risk_level,'unknown') as risk_level, COUNT(*)::int as cnt
+        FROM usage_logs
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        GROUP BY risk_level
+        ORDER BY cnt DESC
+      `),
+    ]);
+    res.json({
+      last5m: last5m.rows[0],
+      fallback: fallback.rows[0],
+      risk: risk.rows,
+      ts: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /v1/admin/team-memory ────────────────────────────────────────────────
 adminRouter.get('/team-memory', async (req: Request, res: Response) => {
   const adminCheck = await requireAdmin(req, res);
   if (adminCheck) return;
   try {
     const rows = await db.query(
-      `SELECT id, scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at
+      `SELECT id, scope, policy_name, policy_text, is_active, status, priority, version, updated_by, created_at, updated_at
        FROM team_memory
-       ORDER BY updated_at DESC
+       ORDER BY priority ASC, updated_at DESC
        LIMIT 100`
     );
     res.json({ items: rows.rows });
@@ -155,15 +191,49 @@ adminRouter.post('/team-memory', async (req: Request, res: Response) => {
   const scope = String(req.body?.scope || 'global').slice(0, 32);
   const policyName = String(req.body?.policyName || '').trim().slice(0, 120);
   const policyText = String(req.body?.policyText || '').trim().slice(0, 12000);
+  const status = String(req.body?.status || 'draft').slice(0, 20);
+  const priority = Number(req.body?.priority ?? 100);
   if (!policyName || !policyText) return res.status(400).json({ error: 'policyName and policyText are required' });
   try {
     const row = await db.query(
-      `INSERT INTO team_memory (scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at)
-       VALUES ($1,$2,$3,true,$4,NOW(),NOW())
-       RETURNING id, scope, policy_name, policy_text, is_active, updated_by, created_at, updated_at`,
-      [scope, policyName, policyText, userId]
+      `INSERT INTO team_memory (scope, policy_name, policy_text, is_active, status, priority, version, updated_by, created_at, updated_at)
+       VALUES ($1,$2,$3,true,$4,$5,1,$6,NOW(),NOW())
+       RETURNING id, scope, policy_name, policy_text, is_active, status, priority, version, updated_by, created_at, updated_at`,
+      [scope, policyName, policyText, status, Math.max(1, priority), userId]
     );
     res.json(row.rows[0]);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+adminRouter.patch('/team-memory/:id', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  const { id } = req.params;
+  const updates: string[] = [];
+  const values: any[] = [];
+  if (typeof req.body?.status === 'string') {
+    values.push(String(req.body.status).slice(0, 20));
+    updates.push(`status=$${values.length}`);
+  }
+  if (typeof req.body?.isActive === 'boolean') {
+    values.push(Boolean(req.body.isActive));
+    updates.push(`is_active=$${values.length}`);
+  }
+  if (typeof req.body?.priority === 'number') {
+    values.push(Math.max(1, Number(req.body.priority)));
+    updates.push(`priority=$${values.length}`);
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No updates provided' });
+  values.push(id);
+  try {
+    const row = await db.query(
+      `UPDATE team_memory SET ${updates.join(', ')}, version=version+1, updated_at=NOW() WHERE id=$${values.length}
+       RETURNING id, scope, policy_name, policy_text, is_active, status, priority, version, updated_at`,
+      values
+    );
+    res.json(row.rows[0] || null);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -177,7 +247,7 @@ adminRouter.get('/payments', async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 20;
   try {
     const rows = await db.query(
-      `SELECT p.id, p.user_id, p.amount, p.plan, p.payment_id, p.created_at, u.email, u.name
+      `SELECT p.id, p.user_id, p.amount, p.currency, p.status, p.plan, p.payment_id, p.created_at, u.email, u.name
        FROM payments p
        LEFT JOIN users u ON p.user_id = u.id
        ORDER BY p.created_at DESC LIMIT $1`,
@@ -301,7 +371,7 @@ adminRouter.get('/users/:id', async (req: Request, res: Response) => {
         COALESCE(SUM(CASE WHEN action IN ('chat','generate','fix','refactor','explain','complete','scaffold') THEN 1 ELSE 0 END),0) as tokensOut,
         (SELECT COUNT(*) FROM usage_logs WHERE user_id=$1 AND created_at > NOW() - INTERVAL '1 day') as requests24h
         FROM usage_logs WHERE user_id=$1`, [id]),
-      db.query(`SELECT id, amount, plan, payment_id, created_at FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`, [id]),
+      db.query(`SELECT id, amount, currency, status, plan, payment_id, created_at FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`, [id]),
       db.query(`SELECT action, COUNT(*) as cnt, DATE_TRUNC('day', created_at)::date as day FROM usage_logs WHERE user_id=$1 GROUP BY action, day ORDER BY day DESC LIMIT 100`, [id]),
     ]);
     

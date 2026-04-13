@@ -45,12 +45,16 @@ export async function incrementUsageDetailed(
     requestMs: number;
     status: 'ok' | 'error';
     usedFallback: boolean;
+    fallbackReason?: string | null;
+    retryCount?: number;
+    riskLevel?: string | null;
+    verifierFailed?: number;
     errorMessage: string | null;
   }
 ) {
   await db.query(
-    `INSERT INTO usage_logs (user_id, action, model, tokens, tokens_in, tokens_out, request_ms, status, used_fallback, error_message, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())`,
+    `INSERT INTO usage_logs (user_id, action, model, tokens, tokens_in, tokens_out, request_ms, status, used_fallback, fallback_reason, retry_count, risk_level, verifier_failed, error_message, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())`,
     [
       userId,
       input.action,
@@ -61,6 +65,10 @@ export async function incrementUsageDetailed(
       input.requestMs || 0,
       input.status || 'ok',
       Boolean(input.usedFallback),
+      input.fallbackReason || null,
+      Math.max(0, input.retryCount || 0),
+      input.riskLevel || null,
+      Math.max(0, input.verifierFailed || 0),
       input.errorMessage || null,
     ]
   );

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import * as DS from '../services/deepseek';
 import { checkQuota, incrementUsage, incrementUsageDetailed } from '../services/quota';
 import { db } from '../services/db';
+import { rankRelevant } from '../services/retrieval';
 
 export const aiRouter = Router();
 
@@ -49,6 +50,22 @@ aiRouter.patch('/preferences', async (req: Request, res: Response) => {
       preferredTemperature,
     });
     res.json(row);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /v1/retrieve ──────────────────────────────────────────────────────────
+aiRouter.post('/retrieve', async (req: Request, res: Response) => {
+  const userId = (req as any).userId;
+  const { query, candidates } = req.body || {};
+  try {
+    const allowed = await checkQuota(userId);
+    if (!allowed) return res.status(429).json({ error: 'Daily quota exceeded.' });
+    const safeCandidates = Array.isArray(candidates) ? candidates.slice(0, 80) : [];
+    const results = rankRelevant(String(query || ''), safeCandidates, 8);
+    await incrementUsage(userId, 'retrieve');
+    res.json({ results });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

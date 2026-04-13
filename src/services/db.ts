@@ -38,6 +38,10 @@ export async function initDb() {
       request_ms INT DEFAULT 0,
       status     TEXT DEFAULT 'ok',
       used_fallback BOOLEAN DEFAULT false,
+      fallback_reason TEXT,
+      retry_count INT DEFAULT 0,
+      risk_level TEXT,
+      verifier_failed INT DEFAULT 0,
       error_message TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -69,6 +73,9 @@ export async function initDb() {
       policy_name TEXT NOT NULL,
       policy_text TEXT NOT NULL,
       is_active   BOOLEAN DEFAULT true,
+      status      TEXT DEFAULT 'approved',
+      priority    INT DEFAULT 100,
+      version     INT DEFAULT 1,
       updated_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
       created_at  TIMESTAMPTZ DEFAULT NOW(),
       updated_at  TIMESTAMPTZ DEFAULT NOW()
@@ -86,6 +93,10 @@ export async function initDb() {
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_ms INT DEFAULT 0;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok';
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS used_fallback BOOLEAN DEFAULT false;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS fallback_reason TEXT;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS risk_level TEXT;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS verifier_failed INT DEFAULT 0;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_message TEXT;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
@@ -94,6 +105,9 @@ export async function initDb() {
     ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS project_memory TEXT DEFAULT '';
     ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS preferred_temperature REAL DEFAULT 0.15;
     ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    ALTER TABLE team_memory ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'approved';
+    ALTER TABLE team_memory ADD COLUMN IF NOT EXISTS priority INT DEFAULT 100;
+    ALTER TABLE team_memory ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;
 
     CREATE INDEX IF NOT EXISTS idx_usage_user_date ON usage_logs(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_status_date ON usage_logs(status, created_at);

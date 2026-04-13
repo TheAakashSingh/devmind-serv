@@ -360,15 +360,15 @@ export async function chat(
   preferredTemperature = 0.15
 ) {
   const teamPolicies = await db.query(
-    `SELECT policy_name, policy_text
+    `SELECT policy_name, policy_text, scope, priority
      FROM team_memory
-     WHERE is_active=true
-     ORDER BY updated_at DESC
+     WHERE is_active=true AND status='approved'
+     ORDER BY priority ASC, updated_at DESC
      LIMIT 8`
   ).catch(() => ({ rows: [] as any[] }));
   const teamMemoryBlock = teamPolicies.rows.length
     ? '\nTeam policies:\n' + teamPolicies.rows
-        .map((r: any) => `- ${r.policy_name}: ${String(r.policy_text || '').slice(0, 600)}`)
+        .map((r: any) => `- [${r.scope}] ${r.policy_name}: ${String(r.policy_text || '').slice(0, 600)}`)
         .join('\n')
     : '';
   const intentRules: Record<Intent, string> = {
