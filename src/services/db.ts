@@ -11,6 +11,9 @@ export async function initDb() {
       api_key    TEXT UNIQUE NOT NULL,
       plan       TEXT DEFAULT 'free',
       is_admin   BOOLEAN DEFAULT false,
+      banned     BOOLEAN DEFAULT false,
+      ip_address TEXT,
+      last_login_at TIMESTAMPTZ,
       email_verified_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -38,10 +41,6 @@ export async function initDb() {
       request_ms INT DEFAULT 0,
       status     TEXT DEFAULT 'ok',
       used_fallback BOOLEAN DEFAULT false,
-      fallback_reason TEXT,
-      retry_count INT DEFAULT 0,
-      risk_level TEXT,
-      verifier_failed INT DEFAULT 0,
       error_message TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -59,12 +58,12 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS ai_preferences (
-      user_id              TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      default_intent       TEXT DEFAULT 'build',
-      auto_verify          BOOLEAN DEFAULT false,
-      project_memory       TEXT DEFAULT '',
+      user_id               TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      default_intent        TEXT DEFAULT 'build',
+      auto_verify           BOOLEAN DEFAULT false,
+      project_memory        TEXT DEFAULT '',
       preferred_temperature REAL DEFAULT 0.15,
-      updated_at           TIMESTAMPTZ DEFAULT NOW()
+      updated_at            TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS team_memory (
@@ -81,7 +80,11 @@ export async function initDb() {
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     );
 
+    -- Safe column additions (idempotent)
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS ip_address TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     ALTER TABLE auth_otps ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0;
@@ -93,10 +96,6 @@ export async function initDb() {
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_ms INT DEFAULT 0;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok';
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS used_fallback BOOLEAN DEFAULT false;
-    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS fallback_reason TEXT;
-    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
-    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS risk_level TEXT;
-    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS verifier_failed INT DEFAULT 0;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_message TEXT;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
@@ -109,10 +108,13 @@ export async function initDb() {
     ALTER TABLE team_memory ADD COLUMN IF NOT EXISTS priority INT DEFAULT 100;
     ALTER TABLE team_memory ADD COLUMN IF NOT EXISTS version INT DEFAULT 1;
 
-    CREATE INDEX IF NOT EXISTS idx_usage_user_date ON usage_logs(user_id, created_at);
+    -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_usage_user_date   ON usage_logs(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_status_date ON usage_logs(status, created_at);
-    CREATE INDEX IF NOT EXISTS idx_users_apikey    ON users(api_key);
-    CREATE INDEX IF NOT EXISTS idx_auth_otps_email ON auth_otps(email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_users_apikey      ON users(api_key);
+    CREATE INDEX IF NOT EXISTS idx_users_email       ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_auth_otps_email   ON auth_otps(email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_payments_user     ON payments(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_team_memory_scope ON team_memory(scope, is_active);
   `);
 
