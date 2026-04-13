@@ -50,6 +50,15 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS ai_preferences (
+      user_id              TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      default_intent       TEXT DEFAULT 'build',
+      auto_verify          BOOLEAN DEFAULT false,
+      project_memory       TEXT DEFAULT '',
+      preferred_temperature REAL DEFAULT 0.15,
+      updated_at           TIMESTAMPTZ DEFAULT NOW()
+    );
+
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
@@ -61,6 +70,11 @@ export async function initDb() {
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS tokens_out INT DEFAULT 0;
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
+    ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS default_intent TEXT DEFAULT 'build';
+    ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS auto_verify BOOLEAN DEFAULT false;
+    ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS project_memory TEXT DEFAULT '';
+    ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS preferred_temperature REAL DEFAULT 0.15;
+    ALTER TABLE ai_preferences ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
     CREATE INDEX IF NOT EXISTS idx_usage_user_date ON usage_logs(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_users_apikey    ON users(api_key);

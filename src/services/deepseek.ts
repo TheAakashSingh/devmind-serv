@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { db } from './db';
 
 function makeClient(): AxiosInstance {
   const key  = process.env.DEEPSEEK_API_KEY  || '';
@@ -18,6 +19,69 @@ function http(): AxiosInstance {
 }
 
 export interface Message { role: 'system' | 'user' | 'assistant'; content: string; }
+type Intent = 'build' | 'debug' | 'refactor' | 'optimize' | 'secure';
+
+export async function getPreferences(userId: string) {
+  const row = await db.query(
+    `SELECT user_id, default_intent, auto_verify, project_memory, preferred_temperature, updated_at
+     FROM ai_preferences WHERE user_id=$1`,
+    [userId]
+  );
+  if (!row.rows.length) {
+    return {
+      userId,
+      defaultIntent: 'build',
+      autoVerify: false,
+      projectMemory: '',
+      preferredTemperature: 0.15,
+    };
+  }
+  const p = row.rows[0];
+  return {
+    userId: p.user_id,
+    defaultIntent: p.default_intent || 'build',
+    autoVerify: Boolean(p.auto_verify),
+    projectMemory: p.project_memory || '',
+    preferredTemperature: Number(p.preferred_temperature ?? 0.15),
+    updatedAt: p.updated_at,
+  };
+}
+
+export async function updatePreferences(userId: string, input: {
+  defaultIntent?: string;
+  autoVerify?: boolean;
+  projectMemory?: string;
+  preferredTemperature?: number;
+}) {
+  const intent = String(input.defaultIntent || 'build').toLowerCase();
+  const validIntents = new Set(['build', 'debug', 'refactor', 'optimize', 'secure']);
+  const safeIntent = validIntents.has(intent) ? intent : 'build';
+  const autoVerify = Boolean(input.autoVerify);
+  const projectMemory = String(input.projectMemory || '').slice(0, 12000);
+  const temp = Math.max(0, Math.min(1, Number(input.preferredTemperature ?? 0.15)));
+
+  const row = await db.query(
+    `INSERT INTO ai_preferences (user_id, default_intent, auto_verify, project_memory, preferred_temperature, updated_at)
+     VALUES ($1,$2,$3,$4,$5,NOW())
+     ON CONFLICT (user_id) DO UPDATE SET
+       default_intent = EXCLUDED.default_intent,
+       auto_verify = EXCLUDED.auto_verify,
+       project_memory = EXCLUDED.project_memory,
+       preferred_temperature = EXCLUDED.preferred_temperature,
+       updated_at = NOW()
+     RETURNING user_id, default_intent, auto_verify, project_memory, preferred_temperature, updated_at`,
+    [userId, safeIntent, autoVerify, projectMemory, temp]
+  );
+  const p = row.rows[0];
+  return {
+    userId: p.user_id,
+    defaultIntent: p.default_intent,
+    autoVerify: Boolean(p.auto_verify),
+    projectMemory: p.project_memory || '',
+    preferredTemperature: Number(p.preferred_temperature ?? 0.15),
+    updatedAt: p.updated_at,
+  };
+}
 
 // ── Core call ─────────────────────────────────────────────────────────────────
 export async function deepseekChat(
@@ -274,7 +338,20 @@ Return ALL files including unchanged ones. No markdown.`;
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
-export async function chat(messages: Message[], language: string, stream: boolean) {
+export async function chat(
+  messages: Message[],
+  language: string,
+  stream: boolean,
+  intent: Intent = 'build',
+  projectMemory = ''
+) {
+  const intentRules: Record<Intent, string> = {
+    build: 'Focus on implementation details and production-ready code.',
+    debug: 'Prioritize root-cause analysis, precise fixes, and validation steps.',
+    refactor: 'Preserve behavior while improving clarity, structure, and maintainability.',
+    optimize: 'Prioritize measurable performance improvements and trade-offs.',
+    secure: 'Prioritize security hardening, threat modeling, and safe defaults.',
+  };
   const sys: Message = {
     role:    'system',
     content: `You are DevMind AI, a senior ${language} pair programmer inside VS Code.
@@ -290,5 +367,10 @@ Response style:
 - Use markdown code blocks for code, and short bullet points for plans/checklists.
 - Prefer actionable outputs over generic explanations.`,
   };
-  return deepseekChat('deepseek-chat', [sys, ...messages], 3500, stream);
+  const memoryBlock = projectMemory
+    ? `\nProject memory:\n${projectMemory.slice(0, 6000)}`
+    : '';
+  const intentBlock = `\nCurrent intent mode: ${intent}\n${intentRules[intent] || intentRules.build}`;
+  const patchedSystem: Message = { role: 'system', content: `${sys.content}${intentBlock}${memoryBlock}` };
+  return deepseekChat('deepseek-chat', [patchedSystem, ...messages], 3500, stream);
 }

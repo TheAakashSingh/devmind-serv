@@ -4,6 +4,39 @@ import { checkQuota, incrementUsage } from '../services/quota';
 
 export const aiRouter = Router();
 
+// ── GET /v1/preferences ───────────────────────────────────────────────────────
+aiRouter.get('/preferences', async (req: Request, res: Response) => {
+  const userId = (req as any).userId;
+  try {
+    const row = await DS.getPreferences(userId);
+    res.json(row);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── PATCH /v1/preferences ─────────────────────────────────────────────────────
+aiRouter.patch('/preferences', async (req: Request, res: Response) => {
+  const userId = (req as any).userId;
+  const {
+    defaultIntent,
+    autoVerify,
+    projectMemory,
+    preferredTemperature,
+  } = req.body || {};
+  try {
+    const row = await DS.updatePreferences(userId, {
+      defaultIntent,
+      autoVerify,
+      projectMemory,
+      preferredTemperature,
+    });
+    res.json(row);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── POST /v1/complete ─────────────────────────────────────────────────────────
 aiRouter.post('/complete', async (req: Request, res: Response) => {
   const { prefix, suffix, language, fileName, projectCtx } = req.body;
@@ -121,7 +154,7 @@ aiRouter.post('/multi-refactor', async (req: Request, res: Response) => {
 
 // ── POST /v1/chat ─────────────────────────────────────────────────────────────
 aiRouter.post('/chat', async (req: Request, res: Response) => {
-  const { messages, language, stream } = req.body;
+  const { messages, language, stream, intent, projectMemory } = req.body;
   const userId = (req as any).userId;
   try {
     const allowed = await checkQuota(userId);
@@ -134,7 +167,13 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
       res.setHeader('X-Accel-Buffering', 'no');
       res.write(': ping\n\n');
 
-      const dataStream = await DS.chat(messages || [], language || 'typescript', true);
+      const dataStream = await DS.chat(
+        messages || [],
+        language || 'typescript',
+        true,
+        intent || 'build',
+        projectMemory || ''
+      );
 
       dataStream.on('data', (chunk: Buffer) => {
         const raw   = chunk.toString();
@@ -156,7 +195,13 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
       });
       req.on('close', () => { try { dataStream.destroy(); } catch {} });
     } else {
-      const data  = await DS.chat(messages || [], language || 'typescript', false);
+      const data  = await DS.chat(
+        messages || [],
+        language || 'typescript',
+        false,
+        intent || 'build',
+        projectMemory || ''
+      );
       const reply = data.choices?.[0]?.message?.content ?? '';
       await incrementUsage(userId, 'chat');
       res.json({ reply });
