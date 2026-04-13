@@ -85,13 +85,17 @@ export async function updatePreferences(userId: string, input: {
 
 // ── Core call ─────────────────────────────────────────────────────────────────
 export async function deepseekChat(
-  model: string, messages: Message[], maxTokens: number, stream = false
+  model: string,
+  messages: Message[],
+  maxTokens: number,
+  stream = false,
+  temperature = 0.15
 ) {
   const res = await http().post('/chat/completions', {
     model,
     messages,
     max_tokens:  maxTokens,
-    temperature: 0.15,
+    temperature,
     stream,
   }, { responseType: stream ? 'stream' : 'json' });
   return res.data;
@@ -343,7 +347,8 @@ export async function chat(
   language: string,
   stream: boolean,
   intent: Intent = 'build',
-  projectMemory = ''
+  projectMemory = '',
+  preferredTemperature = 0.15
 ) {
   const intentRules: Record<Intent, string> = {
     build: 'Focus on implementation details and production-ready code.',
@@ -372,5 +377,5 @@ Response style:
     : '';
   const intentBlock = `\nCurrent intent mode: ${intent}\n${intentRules[intent] || intentRules.build}`;
   const patchedSystem: Message = { role: 'system', content: `${sys.content}${intentBlock}${memoryBlock}` };
-  return deepseekChat('deepseek-chat', [patchedSystem, ...messages], 3500, stream);
+  return deepseekChat('deepseek-chat', [patchedSystem, ...messages], 3500, stream, preferredTemperature);
 }

@@ -159,6 +159,12 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
   try {
     const allowed = await checkQuota(userId);
     if (!allowed) return res.status(429).json({ error: 'Daily quota exceeded.' });
+    const pref = await DS.getPreferences(userId);
+    const effectiveIntent = intent || pref.defaultIntent || 'build';
+    const effectiveMemory = typeof projectMemory === 'string' && projectMemory.trim().length
+      ? projectMemory
+      : (pref.projectMemory || '');
+    const effectiveTemp = Number(pref.preferredTemperature ?? 0.15);
 
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -171,8 +177,9 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
         messages || [],
         language || 'typescript',
         true,
-        intent || 'build',
-        projectMemory || ''
+        effectiveIntent,
+        effectiveMemory,
+        effectiveTemp
       );
 
       dataStream.on('data', (chunk: Buffer) => {
@@ -199,8 +206,9 @@ aiRouter.post('/chat', async (req: Request, res: Response) => {
         messages || [],
         language || 'typescript',
         false,
-        intent || 'build',
-        projectMemory || ''
+        effectiveIntent,
+        effectiveMemory,
+        effectiveTemp
       );
       const reply = data.choices?.[0]?.message?.content ?? '';
       await incrementUsage(userId, 'chat');
