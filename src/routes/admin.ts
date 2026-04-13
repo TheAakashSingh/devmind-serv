@@ -3,8 +3,21 @@ import { db } from '../services/db';
 
 export const adminRouter = Router();
 
+// Middleware to check admin access
+async function requireAdmin(req: Request, res: Response) {
+  const userId = (req as any).userId;
+  const check = await db.query('SELECT is_admin FROM users WHERE id=$1', [userId]);
+  if (!check.rows[0]?.is_admin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  return null;
+}
+
 // ── GET /v1/admin/stats ───────────────────────────────────────────────────────
-adminRouter.get('/stats', async (_req: Request, res: Response) => {
+adminRouter.get('/stats', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
   try {
     const [users, paid, revenue, todayUse, planBreak, featureBreak, dailyActive] = await Promise.all([
       db.query('SELECT COUNT(*) as total FROM users'),
@@ -42,6 +55,9 @@ adminRouter.get('/stats', async (_req: Request, res: Response) => {
 
 // ── GET /v1/admin/users ───────────────────────────────────────────────────────
 adminRouter.get('/users', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
   const page  = parseInt((req.query.page as string) || '1');
   const limit = 20;
   const off   = (page - 1) * limit;
@@ -70,6 +86,9 @@ adminRouter.get('/users', async (req: Request, res: Response) => {
 
 // ── PATCH /v1/admin/users/:id/plan ───────────────────────────────────────────
 adminRouter.patch('/users/:id/plan', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
   const { id }   = req.params;
   const { plan } = req.body;
   const valid = ['free','solo','pro','team','enterprise'];
@@ -84,8 +103,32 @@ adminRouter.patch('/users/:id/plan', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /v1/admin/users/:id ────────────────────────────────────────────────
+adminRouter.get('/users/:id', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
+  const { id } = req.params;
+  try {
+    const user = await db.query(
+      `SELECT id, email, name, plan, is_admin, api_key, email_verified_at, created_at
+       FROM users WHERE id=$1`,
+      [id]
+    );
+    if (!user.rows.length) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ user: user.rows[0] });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /v1/admin/users/:id/usage ─────────────────────────────────────────────
 adminRouter.get('/users/:id/usage', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
   const { id } = req.params;
   try {
     const rows = await db.query(
@@ -101,7 +144,10 @@ adminRouter.get('/users/:id/usage', async (req: Request, res: Response) => {
 });
 
 // ── GET /v1/admin/revenue ─────────────────────────────────────────────────────
-adminRouter.get('/revenue', async (_req: Request, res: Response) => {
+adminRouter.get('/revenue', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
   try {
     const rows = await db.query(
       `SELECT plan, amount, created_at FROM payments ORDER BY created_at DESC LIMIT 50`
@@ -115,16 +161,28 @@ adminRouter.get('/revenue', async (_req: Request, res: Response) => {
   }
 });
 
+// ── PATCH /v1/admin/users/:id/admin ───────────────────────────────────────────
+adminRouter.patch('/users/:id/admin', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
+  const { id } = req.params;
+  const { isAdmin } = req.body;
+  try {
+    await db.query('UPDATE users SET is_admin=$1, updated_at=NOW() WHERE id=$2', [isAdmin ? true : false, id]);
+    res.json({ success: true, is_admin: isAdmin });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── DELETE /v1/admin/users/:id ────────────────────────────────────────────────
 adminRouter.delete('/users/:id', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
   const { id } = req.params;
-  // Only superadmin can delete — check is_admin
-  const requesterId = (req as any).userId;
   try {
-    const check = await db.query('SELECT is_admin FROM users WHERE id=$1', [requesterId]);
-    if (!check.rows[0]?.is_admin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
     await db.query('DELETE FROM users WHERE id=$1', [id]);
     res.json({ success: true });
   } catch (e: any) {
