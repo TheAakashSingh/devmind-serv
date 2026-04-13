@@ -13,6 +13,104 @@ async function requireAdmin(req: Request, res: Response) {
   return null;
 }
 
+// ── GET /v1/admin/activity ───────────────────────────────────────────────
+adminRouter.get('/activity', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
+  const limit = parseInt(req.query.limit as string) || 50;
+  const userId = req.query.userId as string;
+  
+  try {
+    let query = `
+      SELECT u.id, u.email, u.name, u.ip_address, u.last_login_at, u.created_at as joined_at,
+        ul.action, ul.created_at as timestamp, ul.metadata
+      FROM usage_logs ul
+      JOIN users u ON ul.user_id = u.id
+    `;
+    const params: any[] = [limit];
+    
+    if (userId) {
+      query += ` WHERE ul.user_id = $2`;
+      params.push(userId);
+    }
+    
+    query += ` ORDER BY ul.created_at DESC LIMIT $1`;
+    
+    const rows = await db.query(query, params);
+    res.json({ activity: rows.rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /v1/admin/ips ─────────────────────────────────────────────────
+adminRouter.get('/ips', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
+  try {
+    const rows = await db.query(`
+      SELECT u.id, u.email, u.name, u.ip_address, u.last_login_at,
+        COUNT(ul.id) as request_count,
+        MAX(ul.created_at) as last_request
+      FROM users u
+      LEFT JOIN usage_logs ul ON u.id = ul.user_id
+      WHERE u.ip_address IS NOT NULL
+      GROUP BY u.id, u.ip_address
+      ORDER BY request_count DESC
+      LIMIT 100
+    `);
+    res.json({ ips: rows.rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /v1/admin/sessions ───────────────────────────────────────────────
+adminRouter.get('/sessions', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
+  try {
+    const rows = await db.query(`
+      SELECT u.id, u.email, u.name, 
+        u.last_login_at, u.ip_address,
+        COUNT(ul.id) as total_requests,
+        MAX(ul.created_at) as last_activity
+      FROM users u
+      LEFT JOIN usage_logs ul ON u.id = ul.user_id
+      WHERE u.email_verified_at IS NOT NULL
+      GROUP BY u.id
+      ORDER BY last_activity DESC
+      LIMIT 50
+    `);
+    res.json({ sessions: rows.rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /v1/admin/payments ──────────────────────────────────────────────
+adminRouter.get('/payments', async (req: Request, res: Response) => {
+  const adminCheck = await requireAdmin(req, res);
+  if (adminCheck) return;
+  
+  const limit = parseInt(req.query.limit as string) || 20;
+  try {
+    const rows = await db.query(
+      `SELECT p.id, p.user_id, p.amount, p.plan, p.payment_id, p.created_at, u.email, u.name
+       FROM payments p
+       LEFT JOIN users u ON p.user_id = u.id
+       ORDER BY p.created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({ payments: rows.rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /v1/admin/stats ───────────────────────────────────────────────────────
 adminRouter.get('/stats', async (req: Request, res: Response) => {
   const adminCheck = await requireAdmin(req, res);
