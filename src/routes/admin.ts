@@ -118,7 +118,28 @@ adminRouter.get('/users/:id', async (req: Request, res: Response) => {
     if (!user.rows.length) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ user: user.rows[0] });
+    
+    const [summary, payments, usage] = await Promise.all([
+      db.query(`SELECT COUNT(*) as totalRequests,
+        COALESCE(SUM(CASE WHEN action IN ('chat','generate','fix','refactor','explain','complete','scaffold') THEN 1 ELSE 0 END),0) as tokensIn,
+        COALESCE(SUM(CASE WHEN action IN ('chat','generate','fix','refactor','explain','complete','scaffold') THEN 1 ELSE 0 END),0) as tokensOut,
+        (SELECT COUNT(*) FROM usage_logs WHERE user_id=$1 AND created_at > NOW() - INTERVAL '1 day') as requests24h
+        FROM usage_logs WHERE user_id=$1`, [id]),
+      db.query(`SELECT id, amount, plan, payment_id, created_at FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`, [id]),
+      db.query(`SELECT action, COUNT(*) as cnt, DATE_TRUNC('day', created_at)::date as day FROM usage_logs WHERE user_id=$1 GROUP BY action, day ORDER BY day DESC LIMIT 100`, [id]),
+    ]);
+    
+    res.json({
+      user: user.rows[0],
+      summary: {
+        totalRequests: parseInt(summary.rows[0].totalRequests) || 0,
+        tokensIn: parseInt(summary.rows[0].tokensIn) || 0,
+        tokensOut: parseInt(summary.rows[0].tokensOut) || 0,
+        requests24h: parseInt(summary.rows[0].requests24h) || 0,
+      },
+      payments: payments.rows,
+      usage: usage.rows,
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
