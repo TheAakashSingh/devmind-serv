@@ -419,6 +419,14 @@ async function verifyOtp(req: Request, res: Response) {
 
     await db.query('UPDATE auth_otps SET consumed_at=NOW() WHERE id=$1', [otp.id]);
 
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIpRaw = Array.isArray(forwarded)
+      ? forwarded[0]
+      : String(forwarded || '')
+          .split(',')[0]
+          .trim();
+    const clientIp = clientIpRaw || req.socket.remoteAddress || null;
+
     const existing = await db.query('SELECT id, api_key, plan, name FROM users WHERE email=$1', [email]);
     let userId: string;
     let apiKey: string;
@@ -433,11 +441,14 @@ async function verifyOtp(req: Request, res: Response) {
 
       if (name && name !== user.name) {
         await db.query(
-          'UPDATE users SET name=$1, email_verified_at=NOW(), updated_at=NOW() WHERE id=$2',
-          [name, userId]
+          'UPDATE users SET name=$1, email_verified_at=NOW(), last_login_at=NOW(), ip_address=COALESCE($3::text, ip_address), updated_at=NOW() WHERE id=$2',
+          [name, userId, clientIp]
         );
       } else {
-        await db.query('UPDATE users SET email_verified_at=NOW(), updated_at=NOW() WHERE id=$1', [userId]);
+        await db.query(
+          'UPDATE users SET email_verified_at=NOW(), last_login_at=NOW(), ip_address=COALESCE($2::text, ip_address), updated_at=NOW() WHERE id=$1',
+          [userId, clientIp]
+        );
       }
     } else {
       userId = uuid();
@@ -446,9 +457,9 @@ async function verifyOtp(req: Request, res: Response) {
       createdNewUser = true;
 
       await db.query(
-        `INSERT INTO users (id, email, name, api_key, plan, email_verified_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,NOW(),NOW(),NOW())`,
-        [userId, email, name || email.split('@')[0], apiKey, plan]
+        `INSERT INTO users (id, email, name, api_key, plan, email_verified_at, last_login_at, ip_address, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,NOW(),NOW(),$6,NOW(),NOW())`,
+        [userId, email, name || email.split('@')[0], apiKey, plan, clientIp]
       );
     }
 
@@ -520,12 +531,35 @@ authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
 
   try {
     const result = await db.query(
-      'SELECT id, email, name, plan, api_key, is_admin, email_verified_at, created_at FROM users WHERE id=$1',
+      `SELECT id, email, name, plan, api_key, is_admin, email_verified_at, created_at,
+              last_login_at, ip_address, COALESCE(banned, false) AS banned
+       FROM users WHERE id=$1`,
       [userId]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
 
     res.json(result.rows[0]);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+authRouter.get('/activity', authenticate, async (req: Request, res: Response) => {
+  const userId = (req as any).userId;
+  try {
+    const [recent, byAction] = await Promise.all([
+      db.query(
+        `SELECT id, action, model, status, tokens_in, tokens_out, request_ms, created_at
+         FROM usage_logs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 30`,
+        [userId]
+      ),
+      db.query(
+        `SELECT action, COUNT(*)::int AS cnt FROM usage_logs WHERE user_id=$1
+         AND created_at > NOW() - INTERVAL '7 days' GROUP BY action ORDER BY cnt DESC LIMIT 15`,
+        [userId]
+      ),
+    ]);
+    res.json({ recent: recent.rows, byAction: byAction.rows });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

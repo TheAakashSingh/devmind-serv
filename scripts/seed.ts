@@ -139,7 +139,7 @@ async function seedUsageAndPayments() {
     `
     INSERT INTO payments (user_id, plan, order_id, payment_id, amount, currency, status, created_at)
     VALUES
-      ($1, 'pro', 'seed_order_admin_001', 'seed_payment_admin_001', 99900, 'INR', 'completed', NOW() - INTERVAL '8 days'),
+      ($1, 'pro', 'seed_order_admin_001', 'seed_payment_admin_001', 44900, 'INR', 'completed', NOW() - INTERVAL '8 days'),
       ($2, 'free', 'seed_order_sample_001', 'seed_payment_sample_001', 0, 'INR', 'completed', NOW() - INTERVAL '12 days')
     `,
     [ADMIN_USER.id, SAMPLE_USER.id]

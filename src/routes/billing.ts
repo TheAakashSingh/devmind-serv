@@ -14,10 +14,11 @@ function getRazorpay() {
   });
 }
 
+/** Amounts in smallest currency units (paise / cents). Kept in sync with dashboard pricing. */
 const PLANS: Record<string, { inr: number; usd: number; name: string }> = {
-  solo: { inr: 49900, usd: 900,  name: 'DevMind Solo' },
-  pro:  { inr: 99900, usd: 1900, name: 'DevMind Pro'  },
-  team: { inr: 79900, usd: 1500, name: 'DevMind Team' },
+  solo: { inr: 19900, usd: 399, name: 'DevMind Solo' },
+  pro:  { inr: 44900, usd: 899, name: 'DevMind Pro' },
+  team: { inr: 34900, usd: 699, name: 'DevMind Team' },
 };
 
 billingRouter.get('/catalog', (_req: Request, res: Response) => {

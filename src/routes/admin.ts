@@ -56,20 +56,32 @@ adminRouter.get('/users', async (req: Request, res: Response) => {
   try {
     const conds: string[] = [];
     const params: any[]   = [limit, off];
-    if (q)    { params.push(`%${q}%`);   conds.push(`(email ILIKE $${params.length} OR name ILIKE $${params.length})`); }
-    if (plan) { params.push(plan);        conds.push(`plan = $${params.length}`); }
+    if (q)    { params.push(`%${q}%`);   conds.push(`(u.email ILIKE $${params.length} OR u.name ILIKE $${params.length})`); }
+    if (plan) { params.push(plan);        conds.push(`u.plan = $${params.length}`); }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
     const [rows, count] = await Promise.all([
       db.query(
-        `SELECT id, email, name, plan, is_admin, created_at, email_verified_at,
-                COALESCE(banned, false) as banned
-         FROM users ${where}
-         ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+        `SELECT u.id, u.email, u.name, u.plan, u.is_admin, u.created_at, u.email_verified_at,
+                COALESCE(u.banned, false) AS banned,
+                COALESCE((
+                  SELECT SUM(p.amount) FROM payments p
+                  WHERE p.user_id = u.id AND p.status = 'completed' AND p.currency = 'INR'
+                ), 0)::bigint AS total_paid_inr,
+                COALESCE((
+                  SELECT SUM(p.amount) FROM payments p
+                  WHERE p.user_id = u.id AND p.status = 'completed' AND p.currency = 'USD'
+                ), 0)::bigint AS total_paid_usd,
+                COALESCE((
+                  SELECT COUNT(*)::bigint FROM usage_logs ul
+                  WHERE ul.user_id = u.id AND ul.created_at > NOW() - INTERVAL '1 day'
+                ), 0) AS requests_24h
+         FROM users u ${where}
+         ORDER BY u.created_at DESC LIMIT $1 OFFSET $2`,
         params
       ),
       db.query(
-        `SELECT COUNT(*) as total FROM users ${where}`,
+        `SELECT COUNT(*) as total FROM users u ${where}`,
         params.slice(2)
       ),
     ]);
@@ -86,7 +98,7 @@ adminRouter.get('/users/:id', async (req: Request, res: Response) => {
   try {
     const user = await db.query(
       `SELECT id, email, name, plan, is_admin, api_key, email_verified_at, created_at,
-              COALESCE(banned, false) as banned
+              COALESCE(banned, false) AS banned, ip_address, last_login_at
        FROM users WHERE id=$1`,
       [id]
     );
@@ -94,21 +106,28 @@ adminRouter.get('/users/:id', async (req: Request, res: Response) => {
 
     const [summary, payments, usage] = await Promise.all([
       db.query(
-        `SELECT COUNT(*) as totalRequests,
-                (SELECT COUNT(*) FROM usage_logs WHERE user_id=$1 AND created_at > NOW() - INTERVAL '1 day') as requests24h
-         FROM usage_logs WHERE user_id=$1`,
+        `SELECT
+           (SELECT COUNT(*)::int FROM usage_logs WHERE user_id = $1) AS total_requests,
+           (SELECT COUNT(*)::int FROM usage_logs WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 day') AS requests_24h,
+           COALESCE((SELECT SUM(tokens_in)  FROM usage_logs WHERE user_id = $1), 0)::bigint AS tokens_in_sum,
+           COALESCE((SELECT SUM(tokens_out) FROM usage_logs WHERE user_id = $1), 0)::bigint AS tokens_out_sum`,
         [id]
       ),
       db.query(`SELECT id, amount, currency, status, plan, payment_id, created_at FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`, [id]),
-      db.query(`SELECT action, COUNT(*) as cnt, DATE_TRUNC('day', created_at)::date as day FROM usage_logs WHERE user_id=$1 GROUP BY action, day ORDER BY day DESC LIMIT 100`, [id]),
+      db.query(
+        `SELECT id, action, model, tokens_in, tokens_out, status, request_ms, created_at
+         FROM usage_logs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`,
+        [id]
+      ),
     ]);
+    const s = summary.rows[0];
     res.json({
       user: user.rows[0],
       summary: {
-        totalRequests: parseInt(summary.rows[0].totalrequests) || 0,
-        tokensIn:      0,
-        tokensOut:     0,
-        requests24h:   parseInt(summary.rows[0].requests24h)   || 0,
+        totalRequests: parseInt(String(s.total_requests), 10) || 0,
+        tokensIn:      Number(s.tokens_in_sum)  || 0,
+        tokensOut:     Number(s.tokens_out_sum) || 0,
+        requests24h:   parseInt(String(s.requests_24h), 10) || 0,
       },
       payments: payments.rows,
       usage:    usage.rows,
